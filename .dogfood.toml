@@ -1,0 +1,15 @@
+[submission]
+tiers = ["T1", "T2", "T3"]
+pitch = "Z-score normalized judging with quadratic community voting — one command, zero cloud"
+bonuses = ["normalization-proof", "threat-model"]
+
+[team]
+size = 1
+
+[stack]
+framework = "Next.js 14 App Router"
+language  = "TypeScript"
+database  = "PostgreSQL 16"
+orm       = "Prisma v5"
+auth      = "Custom session tokens (bcrypt + SHA-256, no external service)"
+css       = "Vanilla CSS"

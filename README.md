@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DOGFOOD Platform
 
-## Getting Started
+A modern, open-source, self-hostable hackathon submission and judging platform.
 
-First, run the development server:
+## One-Command Startup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <your-repo>
+cd your-portal
+docker compose up
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App runs at **http://localhost:3000**
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Default accounts (seeded automatically):**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Role | Email | Password |
+|---|---|---|
+| Admin | admin@dogfood.dev | password123 |
+| Organizer | organizer@dogfood.dev | password123 |
+| Judges | judge1-5@dogfood.dev | password123 |
+| Teams | team1-6@dogfood.dev | password123 |
 
-## Learn More
+## What It Does
 
-To learn more about Next.js, take a look at the following resources:
+- **T1 — Core**: Auth (5 roles), event creation with tracks, team formation via invite link, project submission with deadline enforcement, public gallery with search/filter
+- **T2 — Judging**: Judge invitation/batch import, weighted rubric builder, backend-enforced score isolation, round-robin assignment, Z-score normalization, organizer live dashboard, CSV export
+- **T3 — Community**: Quadratic voting (k votes costs k² credits), randomized ballot ordering, rate limiting, email-gated voter tokens, audit trail
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Requirements
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Docker + Docker Compose — that's it. No cloud, no external auth, runs fully offline.
 
-## Deploy on Vercel
+## Key Security Properties
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Judge scores are **never exposed cross-judge** — every query in the DAL is `WHERE judge_id = session_user_id`
+- All score writes are audit-logged to an append-only table
+- Deadline enforcement is in the API layer, not the frontend (survives `curl`)
+- Role checks are in the backend — test with: `curl -X POST /api/events/:id/scores` (no token → 401)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Architecture / Judging / Data Model
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md), [JUDGING.md](./JUDGING.md), [DATA-MODEL.md](./DATA-MODEL.md)
+
+## Honest Limits
+
+- Email delivery: voter tokens and judge invite URLs are logged to stdout in self-hosted mode (`docker compose logs app`)
+- T4 REST API / webhooks: not implemented
+- Certificate generation: not implemented
+
+## License
+
+MIT
