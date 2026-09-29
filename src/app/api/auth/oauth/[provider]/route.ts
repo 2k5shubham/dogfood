@@ -19,11 +19,11 @@ export async function GET(
   // Generate random state to prevent CSRF
   const state = crypto.randomBytes(16).toString('hex')
 
-  const isDev = process.env.NODE_ENV !== 'production'
+  const allowMock = process.env.NODE_ENV !== 'production' || process.env.ENABLE_MOCK_OAUTH === 'true'
 
-  // If not configured in .env and in development, redirect to mock OAuth screen
+  // If not configured in .env and mock is allowed, redirect to mock OAuth screen
   if (!config.configured) {
-    if (isDev) {
+    if (allowMock) {
       const mockUrl = new URL(`/auth/oauth/mock`, getBaseUrl())
       mockUrl.searchParams.set('provider', provider)
       mockUrl.searchParams.set('state', state)

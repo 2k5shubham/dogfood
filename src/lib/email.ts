@@ -159,3 +159,8 @@ export async function sendPasswordResetOtpEmail(to: string, otp: string) {
   })
   return sendEmail({ to, subject, html, text })
 }
+
+export async function sendOtpEmail(to: string, otp: string) {
+  return sendRegistrationOtpEmail(to, otp)
+}
+

@@ -38,12 +38,12 @@ export function err(message: string, status = 400): Response {
   return Response.json({ success: false, error: message }, { status })
 }
 
-export function unauthorized(): Response {
-  return err('Unauthorized', 401)
+export function unauthorized(message = 'Unauthorized'): Response {
+  return err(message, 401)
 }
 
-export function forbidden(): Response {
-  return err('Forbidden', 403)
+export function forbidden(message = 'Forbidden'): Response {
+  return err(message, 403)
 }
 
 export function notFound(resource = 'Resource'): Response {

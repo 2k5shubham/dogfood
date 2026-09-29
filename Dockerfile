@@ -36,8 +36,13 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts ./scripts
 
+RUN mkdir -p .next && chown nextjs:nodejs .next
+
+# Standalone output bundle + static assets
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Copy full node_modules so prisma CLI & seed scripts are ready offline
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 
 USER nextjs
 
@@ -46,5 +51,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Run migrations + seed + start
-CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/seed.js && node server.js"]
+# Sync schema to PostgreSQL + seed initial accounts + launch Next.js server
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node scripts/seed.js && node server.js"]

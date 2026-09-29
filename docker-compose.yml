@@ -26,9 +26,24 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://dogfood:dogfood_secret@db:5432/dogfood
-      JWT_SECRET: dogfood-dev-secret-change-in-production
+      JWT_SECRET: ${JWT_SECRET:-dogfood-dev-secret-change-in-production}
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      ENABLE_MOCK_OAUTH: ${ENABLE_MOCK_OAUTH:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
     ports:
       - "3000:3000"
 
