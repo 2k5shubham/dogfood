@@ -40,12 +40,37 @@ function LoginContent() {
     }
   }
 
+  async function loginWithCreds(demoEmail: string, demoPassword: string, customRedirect?: string) {
+    setEmail(demoEmail)
+    setPassword(demoPassword)
+    setLoading(true)
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: demoEmail.trim().toLowerCase(), password: demoPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error ?? 'Login failed')
+        return
+      }
+      toast.success(`Welcome, ${data.data?.user?.displayName || 'User'}!`)
+      router.push(customRedirect || redirect)
+      router.refresh()
+    } catch {
+      toast.error('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
       <div className="card" style={{ width: '100%', maxWidth: '420px', boxShadow: '0 20px 40px rgba(0,0,0,0.5)', border: '1px solid rgba(139,92,246,0.2)' }}>
         <div className="card-body" style={{ padding: '2.25rem' }}>
           {/* Header */}
-          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
             <Link href="/" className="navbar-logo" style={{ fontSize: '1.5rem', display: 'inline-block' }}>
               DOGFOOD
             </Link>
@@ -55,6 +80,42 @@ function LoginContent() {
             <p className="text-muted" style={{ fontSize: '0.85rem' }}>
               Enter your verified email and password
             </p>
+          </div>
+
+          {/* Quick Demo Role Logins */}
+          <div style={{ marginBottom: '1.25rem', background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.25)', borderRadius: '10px', padding: '10px 12px' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--violet-300)', fontWeight: 700, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span>⚡ 1-Click Role Logins:</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px' }}>
+              <button
+                type="button"
+                id="btn-demo-judge"
+                onClick={() => loginWithCreds('judge1@dogfood.dev', 'password123', '/judge/cmuk4sgzz000gp0bsol1rlla2')}
+                style={{ padding: '7px 8px', fontSize: '0.78rem', borderRadius: '6px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: '#fff', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                title="Sign in as Judge"
+              >
+                ⚖️ Judge
+              </button>
+              <button
+                type="button"
+                id="btn-demo-organizer"
+                onClick={() => loginWithCreds('admin@dogfood.dev', 'password123', '/organizer/cmuk4sgzz000gp0bsol1rlla2')}
+                style={{ padding: '7px 8px', fontSize: '0.78rem', borderRadius: '6px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: '#fff', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                title="Sign in as Organizer"
+              >
+                👑 Admin
+              </button>
+              <button
+                type="button"
+                id="btn-demo-voter"
+                onClick={() => loginWithCreds('team2@dogfood.dev', 'password123', '/vote/cmuk4sgzz000gp0bsol1rlla2')}
+                style={{ padding: '7px 8px', fontSize: '0.78rem', borderRadius: '6px', background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border)', color: '#fff', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                title="Sign in as Participant Voter"
+              >
+                🗳️ Voter
+              </button>
+            </div>
           </div>
 
           {/* Social OAuth Buttons */}
