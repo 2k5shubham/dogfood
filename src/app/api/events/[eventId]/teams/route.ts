@@ -52,13 +52,25 @@ export async function POST(
 
 // GET /api/events/[eventId]/teams — list teams
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
   const { eventId } = await params
+  const { searchParams } = new URL(req.url)
+  const mine = searchParams.get('mine') === 'true'
+
+  let userFilter = {}
+  if (mine) {
+    const user = await getCurrentUser()
+    if (!user) return unauthorized()
+    userFilter = { members: { some: { userId: user.id } } }
+  }
 
   const teams = await prisma.team.findMany({
-    where: { eventId },
+    where: {
+      eventId,
+      ...userFilter,
+    },
     include: {
       members: {
         include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },

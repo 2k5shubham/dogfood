@@ -37,7 +37,8 @@ export async function PATCH(
   const body = await request.json()
   const {
     title, description, status,
-    submissionDeadline, votingOpensAt, votingDeadline, resultsPublishedAt,
+    submissionDeadline, submissionOpensAt, registrationOpensAt,
+    votingOpensAt, votingDeadline, resultsPublishedAt,
   } = body
 
   const event = await prisma.event.update({
@@ -47,6 +48,8 @@ export async function PATCH(
       ...(description && { description }),
       ...(status && { status }),
       ...(submissionDeadline && { submissionDeadline: new Date(submissionDeadline) }),
+      ...(submissionOpensAt && { submissionOpensAt: new Date(submissionOpensAt) }),
+      ...(registrationOpensAt && { registrationOpensAt: new Date(registrationOpensAt) }),
       ...(votingOpensAt && { votingOpensAt: new Date(votingOpensAt) }),
       ...(votingDeadline && { votingDeadline: new Date(votingDeadline) }),
       ...(resultsPublishedAt && { resultsPublishedAt: new Date(resultsPublishedAt) }),

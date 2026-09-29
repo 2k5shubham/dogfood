@@ -19,7 +19,7 @@ export async function GET(
         include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
         orderBy: { createdAt: 'asc' },
       },
-      _count: { select: { projectVotes: true, comments: true } },
+      _count: { select: { userVotes: true, comments: true } },
     },
   })
 

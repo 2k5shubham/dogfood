@@ -1,171 +1,259 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { toast } from 'sonner'
-import { Minus, Plus, CheckCircle2, Info } from 'lucide-react'
+import { Heart, LogIn, Shield, CheckCircle2, AlertTriangle, Trophy, ArrowRight } from 'lucide-react'
 import { Suspense } from 'react'
 
-interface Project { id: string; title: string; tagline: string | null; team: { name: string }; track: { name: string } | null }
-interface Vote { projectId: string; voteCount: number; creditsSpent: number }
+interface Project {
+  id: string
+  title: string
+  tagline: string | null
+  team: { name: string }
+  track: { name: string } | null
+  _count: { userVotes: number; comments: number }
+}
+
+interface User {
+  id: string
+  displayName: string
+  email: string
+}
 
 function VotingContent() {
   const params = useParams()
-  const searchParams = useSearchParams()
+  const router = useRouter()
   const eventId = params.eventId as string
-  const token = searchParams.get('token') ?? ''
 
   const [projects, setProjects] = useState<Project[]>([])
-  const [votes, setVotes] = useState<Record<string, number>>({})
-  const [creditsRemaining, setCreditsRemaining] = useState(100)
-  const [ballotOrder, setBallotOrder] = useState<string[]>([])
+  const [myVotes, setMyVotes] = useState<Set<string>>(new Set())
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<string | null>(null)
+  const [votingClosed, setVotingClosed] = useState(false)
+  const [votingNotOpen, setVotingNotOpen] = useState(false)
 
   useEffect(() => {
-    if (!token) { setLoading(false); return }
     Promise.all([
-      fetch(`/api/events/${eventId}/projects?limit=50`).then((r) => r.json()),
-      fetch(`/api/events/${eventId}/vote/cast?token=${token}`).then((r) => r.json()),
-    ]).then(([projData, voteData]) => {
-      const allProjects: Project[] = projData.data?.projects ?? []
-      setProjects(allProjects)
+      fetch('/api/auth/me').then(r => r.ok ? r.json() : null),
+      fetch(`/api/events/${eventId}/projects?limit=50`).then(r => r.json()),
+      fetch(`/api/events/${eventId}/vote/cast`).then(r => r.json()),
+      fetch(`/api/events/${eventId}`).then(r => r.json()),
+    ]).then(([authData, projData, voteData, evData]) => {
+      if (authData?.data?.user) setUser(authData.data.user)
 
-      const existingVotes: Record<string, number> = {}
-      for (const v of voteData.data?.votes ?? []) existingVotes[v.projectId] = v.voteCount
-      setVotes(existingVotes)
-      setCreditsRemaining(voteData.data?.creditsRemaining ?? 100)
-      setBallotOrder(voteData.data?.ballotOrder ?? allProjects.map((p) => p.id))
+      // Shuffle projects for this viewer (random order = no position bias)
+      const allProjects: Project[] = projData?.data?.projects ?? []
+      const shuffled = [...allProjects].sort(() => Math.random() - 0.5)
+      setProjects(shuffled)
+
+      if (voteData?.data?.myVotes) {
+        setMyVotes(new Set(voteData.data.myVotes))
+      }
+
+      const ev = evData?.data?.event
+      const now = new Date()
+      if (ev?.votingDeadline && now > new Date(ev.votingDeadline)) setVotingClosed(true)
+      if (ev?.votingOpensAt && now < new Date(ev.votingOpensAt)) setVotingNotOpen(true)
+
       setLoading(false)
-    })
-  }, [eventId, token])
+    }).catch(() => setLoading(false))
+  }, [eventId])
 
-  function quadCost(k: number) { return k * k }
-  function creditDelta(oldV: number, newV: number) { return quadCost(newV) - quadCost(oldV) }
-
-  async function changeVote(projectId: string, newCount: number) {
-    const old = votes[projectId] ?? 0
-    const delta = creditDelta(old, newCount)
-    if (creditsRemaining - delta < 0) { toast.error('Not enough credits!'); return }
+  async function toggleVote(projectId: string) {
+    if (!user) {
+      router.push(`/login?redirect=/vote/${eventId}`)
+      return
+    }
+    if (votingClosed || votingNotOpen) return
 
     setPending(projectId)
     try {
       const res = await fetch(`/api/events/${eventId}/vote/cast`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, projectId, voteCount: newCount }),
+        body: JSON.stringify({ projectId }),
       })
       const d = await res.json()
-      if (!res.ok) { toast.error(d.error ?? 'Vote failed'); return }
-      setVotes((prev) => ({ ...prev, [projectId]: newCount }))
-      setCreditsRemaining(d.data.creditsRemaining)
+      if (!res.ok) {
+        toast.error(d.error ?? 'Vote failed')
+        return
+      }
+      const wasVoted = myVotes.has(projectId)
+      setMyVotes(prev => {
+        const next = new Set(prev)
+        if (wasVoted) next.delete(projectId)
+        else next.add(projectId)
+        return next
+      })
+      // Update local vote count
+      setProjects(prev => prev.map(p =>
+        p.id === projectId
+          ? { ...p, _count: { ...p._count, userVotes: d.data.voteCount } }
+          : p
+      ))
+      toast.success(wasVoted ? 'Vote removed' : '❤️ Vote cast!')
     } finally {
       setPending(null)
     }
   }
 
-  const orderedProjects = ballotOrder.length > 0
-    ? ballotOrder.map((id) => projects.find((p) => p.id === id)).filter(Boolean) as Project[]
-    : projects
-
-  if (!token) return (
+  if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card" style={{ maxWidth: 420, padding: '2rem', textAlign: 'center' }}>
-        <h2>Community Vote</h2>
-        <p className="text-muted" style={{ marginTop: '0.5rem', marginBottom: '1.5rem' }}>Enter your email to get a voting token.</p>
-        <VoterTokenForm eventId={eventId} />
-      </div>
+      <p className="text-muted">Loading ballot…</p>
     </div>
   )
 
-  const totalCredits = 100
-  const creditPct = (creditsRemaining / totalCredits) * 100
+  const totalVotes = myVotes.size
 
   return (
-    <div style={{ minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', paddingBottom: '5rem' }}>
       <nav className="navbar">
         <div className="container navbar-inner">
-          <span className="navbar-logo">DOGFOOD</span>
-          <div className="badge badge-green"><CheckCircle2 size={12} /> Email Verified</div>
+          <Link href="/" className="navbar-logo">DOGFOOD</Link>
+          {user && (
+            <div className="badge badge-green" style={{ gap: '6px' }}>
+              <CheckCircle2 size={12} /> Voting as {user.displayName}
+            </div>
+          )}
+          <Link href="/" className="btn btn-ghost btn-sm">← Gallery</Link>
         </div>
       </nav>
 
-      <main className="container" style={{ paddingTop: '2rem', paddingBottom: '4rem' }}>
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <h1>Community Vote</h1>
-          <p className="text-secondary" style={{ marginTop: '0.5rem' }}>
-            You have <strong style={{ color: 'var(--cyan-400)' }}>{creditsRemaining} credits</strong>.
-            Voting k times for a project costs k² credits.
+      <main className="container" style={{ paddingTop: '2rem', maxWidth: '1100px' }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+          <div className="badge badge-violet" style={{ display: 'inline-flex', marginBottom: '1rem', gap: '6px' }}>
+            <Trophy size={14} /> Community Vote
+          </div>
+          <h1 style={{ fontSize: '2.25rem', fontWeight: 800, letterSpacing: '-0.02em', marginBottom: '0.75rem' }}>
+            Vote for your favourites
+          </h1>
+          <p className="text-secondary" style={{ maxWidth: 560, margin: '0 auto 1.5rem' }}>
+            One upvote per project. You can vote for as many projects as you like, and retract votes at any time.
           </p>
-          <div className="alert alert-info" style={{ maxWidth: 560, margin: '1rem auto 0', fontSize: '0.8125rem', justifyContent: 'center', gap: '0.5rem' }}>
-            <Info size={14} /> Ballot order is randomized per voter to eliminate position bias.
+
+          {/* Anti-Sybil explanation */}
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap', maxWidth: 700, margin: '0 auto' }}>
+            {[
+              { icon: <Shield size={14} />, text: 'Account-bound: 1 vote per registered user per project', color: 'var(--violet-400)' },
+              { icon: <CheckCircle2 size={14} />, text: 'No self-voting: own team\'s projects excluded', color: 'var(--green-400)' },
+              { icon: <Shield size={14} />, text: 'Account age verified: only pre-deadline accounts can vote', color: 'var(--cyan-400)' },
+            ].map((item, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: item.color, background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: 999, padding: '4px 12px' }}>
+                {item.icon} {item.text}
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Credit budget bar */}
-        <div className="credit-bar" style={{ maxWidth: 680, margin: '0 auto 2.5rem' }}>
-          <div className="credit-bar-header">
-            <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Credits remaining</span>
-            <span className="credit-remaining">{creditsRemaining} / {totalCredits}</span>
+        {/* Not logged in banner */}
+        {!user && (
+          <div style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius-lg)', padding: '1.5rem 2rem', marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+            <LogIn size={24} style={{ color: 'var(--violet-400)', flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, marginBottom: '0.25rem' }}>Sign in to vote</div>
+              <div className="text-muted" style={{ fontSize: '0.875rem' }}>
+                Voting requires a registered account. Each account can vote once per project — your email is the Sybil barrier.
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', flexShrink: 0 }}>
+              <Link href={`/login?redirect=/vote/${eventId}`} className="btn btn-primary btn-sm">
+                <LogIn size={14} /> Log In
+              </Link>
+              <Link href={`/register?redirect=/vote/${eventId}`} className="btn btn-outline btn-sm">
+                Register
+              </Link>
+            </div>
           </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${creditPct}%` }} />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            <span>1 vote = 1 credit</span>
-            <span>2 votes = 4 credits</span>
-            <span>5 votes = 25 credits</span>
-            <span>10 votes = 100 credits</span>
-          </div>
-        </div>
+        )}
 
-        {loading ? (
-          <p className="text-muted" style={{ textAlign: 'center' }}>Loading projects...</p>
+        {/* Voting closed / not open yet */}
+        {votingClosed && (
+          <div className="alert alert-warning" style={{ marginBottom: '2rem', justifyContent: 'center' }}>
+            <AlertTriangle size={16} /> Voting has closed. Results are being tallied.
+          </div>
+        )}
+        {votingNotOpen && (
+          <div className="alert alert-info" style={{ marginBottom: '2rem', justifyContent: 'center' }}>
+            Voting has not opened yet. Check back later.
+          </div>
+        )}
+
+        {/* Vote summary */}
+        {user && totalVotes > 0 && (
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+            You've voted for <strong style={{ color: 'var(--violet-400)' }}>{totalVotes}</strong> project{totalVotes !== 1 ? 's' : ''}. You can change your votes anytime before voting closes.
+          </div>
+        )}
+
+        {/* Project grid */}
+        {projects.length === 0 ? (
+          <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
+            <p className="text-muted">No submitted projects yet.</p>
+          </div>
         ) : (
-          <div className="grid-projects stagger">
-            {orderedProjects.map((p) => {
-              const currentVotes = votes[p.id] ?? 0
-              const currentCost = quadCost(currentVotes)
-              const nextCost = quadCost(currentVotes + 1) - currentCost
-              const canAdd = creditsRemaining >= nextCost
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
+            {projects.map(p => {
+              const voted = myVotes.has(p.id)
+              const isPending = pending === p.id
+              const disabled = votingClosed || votingNotOpen || isPending
 
               return (
-                <div key={p.id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ height: 140, background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-overlay))', borderRadius: '14px 14px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: '2rem' }}>🚀</span>
+                <div
+                  key={p.id}
+                  className="card"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    border: voted ? '1px solid rgba(139,92,246,0.45)' : '1px solid var(--border)',
+                    background: voted ? 'rgba(139,92,246,0.06)' : undefined,
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  {/* Cover placeholder */}
+                  <div style={{ height: 130, background: 'linear-gradient(135deg, var(--bg-elevated), var(--bg-overlay))', borderRadius: '14px 14px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2.5rem' }}>
+                    🚀
                   </div>
+
                   <div className="card-body" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {p.track && <span className="badge badge-violet">{p.track.name}</span>}
-                    <h3 style={{ fontSize: '1rem' }}>{p.title}</h3>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>
+                      <Link href={`/projects/${p.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>
+                        {p.title}
+                      </Link>
+                    </h3>
                     <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>by {p.team.name}</p>
-                    {p.tagline && <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', flex: 1 }}>{p.tagline}</p>}
+                    {p.tagline && (
+                      <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', flex: 1, lineHeight: 1.5 }}>
+                        {p.tagline}
+                      </p>
+                    )}
 
-                    <div className="vote-control" style={{ marginTop: 'auto' }}>
-                      <button
-                        className="vote-btn"
-                        onClick={() => changeVote(p.id, Math.max(0, currentVotes - 1))}
-                        disabled={currentVotes === 0 || pending === p.id}
-                      >
-                        <Minus size={16} />
-                      </button>
-                      <span className="vote-count" style={{ color: currentVotes > 0 ? 'var(--violet-400)' : 'var(--text-muted)' }}>
-                        {currentVotes}
-                      </span>
-                      <div style={{ position: 'relative' }}>
-                        <button
-                          className="vote-btn"
-                          onClick={() => changeVote(p.id, currentVotes + 1)}
-                          disabled={!canAdd || pending === p.id}
-                          title={canAdd ? `Next vote costs ${nextCost} credit${nextCost !== 1 ? 's' : ''}` : 'Not enough credits'}
-                        >
-                          <Plus size={16} />
-                        </button>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
+                      {/* Vote count */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.875rem', color: voted ? 'var(--violet-400)' : 'var(--text-muted)' }}>
+                        <Heart size={15} fill={voted ? 'var(--violet-400)' : 'none'} />
+                        <span style={{ fontWeight: 600 }}>{p._count.userVotes}</span>
+                        <span>vote{p._count.userVotes !== 1 ? 's' : ''}</span>
                       </div>
-                    </div>
-                    <div className="vote-cost">
-                      {currentVotes > 0
-                        ? `Cost: ${currentCost} credit${currentCost !== 1 ? 's' : ''}`
-                        : canAdd ? `1st vote = 1 credit` : 'No credits left'
-                      }
+
+                      {/* Vote button */}
+                      <button
+                        onClick={() => toggleVote(p.id)}
+                        disabled={disabled}
+                        className={voted ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm'}
+                        style={{
+                          gap: '5px',
+                          opacity: disabled && !isPending ? 0.5 : 1,
+                          minWidth: 100,
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Heart size={14} fill={voted ? '#fff' : 'none'} />
+                        {isPending ? '…' : voted ? 'Voted ✓' : !user ? 'Login to Vote' : 'Upvote'}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -178,48 +266,9 @@ function VotingContent() {
   )
 }
 
-function VoterTokenForm({ eventId }: { eventId: string }) {
-  const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [tokenUrl, setTokenUrl] = useState('')
-
-  async function request() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/events/${eventId}/vote/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      const d = await res.json()
-      if (!res.ok) { toast.error(d.error); return }
-      setTokenUrl(d.data.voteUrl)
-      toast.success('Voting link generated!')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (tokenUrl) return (
-    <div>
-      <p className="text-secondary" style={{ marginBottom: '1rem', fontSize: '0.875rem' }}>Your voting link:</p>
-      <a href={tokenUrl} className="btn btn-primary w-full">{tokenUrl.slice(0, 50)}...</a>
-    </div>
-  )
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <input className="form-input" type="email" placeholder="your@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <button className="btn btn-primary" onClick={request} disabled={!email || loading}>
-        {loading ? 'Requesting...' : 'Get Voting Link'}
-      </button>
-    </div>
-  )
-}
-
 export default function VotingPage() {
   return (
-    <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p className="text-muted">Loading...</p></div>}>
+    <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><p className="text-muted">Loading…</p></div>}>
       <VotingContent />
     </Suspense>
   )

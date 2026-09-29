@@ -60,7 +60,7 @@ interface ProjectData {
     }
   }>
   _count: {
-    projectVotes: number
+    userVotes?: number
     comments: number
   }
 }
@@ -255,7 +255,7 @@ export default function ProjectDetailPage() {
               className="btn btn-primary btn-sm"
               style={{ marginLeft: 'auto' }}
             >
-              <Trophy size={15} /> Quadratic Voting ({project._count.projectVotes} votes)
+              <Trophy size={15} /> Community Vote ({project._count.userVotes ?? 0} votes)
             </Link>
           </div>
         </div>

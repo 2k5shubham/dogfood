@@ -21,7 +21,7 @@ export async function POST(request: Request) {
       where: { email: email.toLowerCase() },
     })
 
-    if (!user || !(await verifyPassword(password, user.passwordHash))) {
+    if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       return err('Invalid email or password', 401)
     }
 

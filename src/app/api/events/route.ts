@@ -17,8 +17,9 @@ export async function GET(request: Request) {
     where: status ? { status } : undefined,
     select: {
       id: true, slug: true, title: true, description: true, status: true,
-      submissionDeadline: true, resultsPublishedAt: true,
-      tracks: { select: { id: true, name: true, prizeAmount: true } },
+      submissionDeadline: true, submissionOpensAt: true, registrationOpensAt: true,
+      votingOpensAt: true, votingDeadline: true, resultsPublishedAt: true,
+      tracks: { select: { id: true, name: true, prizeAmount: true, prizeCurrency: true, description: true } },
       _count: { select: { projects: true, eventRoles: true } },
     },
     orderBy: { createdAt: 'desc' },

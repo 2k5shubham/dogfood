@@ -26,15 +26,15 @@ export async function GET(
   const isPublished = !!event.resultsPublishedAt && event.resultsPublishedAt <= new Date()
 
   // Get community vote counts per project
-  const communityVotes = await prisma.projectVote.groupBy({
+  const communityVotes = await prisma.userVote.groupBy({
     by: ['projectId'],
-    _sum: { voteCount: true },
-    where: { project: { eventId } },
+    _count: { id: true },
+    where: { eventId },
   })
 
   const voteMap = new Map<string, number>()
   for (const v of communityVotes) {
-    voteMap.set(v.projectId, v._sum.voteCount || 0)
+    voteMap.set(v.projectId, v._count.id || 0)
   }
 
   const cachedLeaderboard = await getLeaderboard(eventId)

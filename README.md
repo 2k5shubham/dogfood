@@ -23,9 +23,9 @@ App runs at **http://localhost:3000**
 
 ## What It Does
 
-- **T1 — Core**: Auth (5 roles), event creation with tracks, team formation via invite link, project submission with deadline enforcement, public gallery with search/filter
-- **T2 — Judging**: Judge invitation/batch import, weighted rubric builder, backend-enforced score isolation, round-robin assignment, Z-score normalization, organizer live dashboard, CSV export
-- **T3 — Community**: Quadratic voting (k votes costs k² credits), randomized ballot ordering, rate limiting, email-gated voter tokens, audit trail
+- **T1 — Core**: Auth & sessions (5 roles), event creation with tracks & prizes, team formation via invite link, project submission with DAL deadline enforcement, public gallery with real-time search/filter
+- **T2 — Judging**: Judge invitation/role management, weighted rubric builder, backend-enforced score isolation, round-robin assignment, Z-score & trimmed mean normalization, organizer live dashboard, CSV/JSON export
+- **T3 — Community & Security**: Account-bound anti-Sybil community voting (DB unique constraint, pre-deadline account age check, self-vote prevention), email OTP verification on registration, forgot password OTP reset, social OAuth sign-in (Google, GitHub, Discord), and full audit logging
 
 ## Requirements
 

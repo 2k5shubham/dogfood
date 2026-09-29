@@ -37,7 +37,7 @@ export async function GET(
         submittedAt: true, repoUrl: true, demoUrl: true,
         team: { select: { id: true, name: true } },
         track: { select: { id: true, name: true } },
-        _count: { select: { comments: true, projectVotes: true } },
+        _count: { select: { comments: true, userVotes: true } },
       },
       orderBy: { submittedAt: 'desc' },
       skip,

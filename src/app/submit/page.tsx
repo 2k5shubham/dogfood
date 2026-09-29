@@ -53,6 +53,8 @@ export default function SubmitProjectPage() {
   // Team creation modal/inline
   const [newTeamName, setNewTeamName] = useState('')
   const [creatingTeam, setCreatingTeam] = useState(false)
+  const [inviteCode, setInviteCode] = useState<string | null>(null)
+  const [copiedInvite, setCopiedInvite] = useState(false)
 
   useEffect(() => {
     // 1. Verify user authentication
@@ -71,22 +73,28 @@ export default function SubmitProjectPage() {
     // 2. Fetch active event
     fetch('/api/events?status=active&limit=1')
       .then((r) => r.json())
-      .then((d) => {
-        const ev = d?.data?.events?.[0]
+      .then(async (d) => {
+        let ev = d?.data?.events?.[0]
+        if (!ev) {
+          const fb = await fetch('/api/events?limit=1').then((r) => r.json()).catch(() => null)
+          ev = fb?.data?.events?.[0]
+        }
         if (ev) {
           setEventId(ev.id)
           setEventTitle(ev.title)
           setTracks(ev.tracks || [])
           if (ev.submissionDeadline) setDeadline(new Date(ev.submissionDeadline))
 
-          // 3. Fetch user's teams in this event
-          fetch(`/api/events/${ev.id}/teams`)
+          // 3. Fetch user's own teams in this event
+          fetch(`/api/events/${ev.id}/teams?mine=true`)
             .then((r) => r.json())
             .then((td) => {
-              const allTeams: any[] = td?.data?.teams || []
-              setTeams(allTeams)
-              if (allTeams.length > 0) {
-                setTeamId(allTeams[0].id)
+              const myTeams: any[] = td?.data?.teams || []
+              setTeams(myTeams)
+              if (myTeams.length > 0) {
+                setTeamId(myTeams[0].id)
+                // Show invite code so user can share with teammates
+                if (myTeams[0].inviteCode) setInviteCode(myTeams[0].inviteCode)
               }
               setLoading(false)
             })
@@ -100,7 +108,14 @@ export default function SubmitProjectPage() {
 
   const handleCreateTeam = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newTeamName.trim() || !eventId) return
+    if (!newTeamName.trim()) {
+      toast.error('Please enter a team name')
+      return
+    }
+    if (!eventId) {
+      toast.error('Event is still loading, please wait')
+      return
+    }
     setCreatingTeam(true)
 
     try {
@@ -114,6 +129,7 @@ export default function SubmitProjectPage() {
         toast.success(`Team "${data.data.team.name}" created!`)
         setTeams((prev) => [...prev, data.data.team])
         setTeamId(data.data.team.id)
+        setInviteCode(data.data.team.inviteCode ?? null)
         setNewTeamName('')
       } else {
         toast.error(data.error?.message || 'Failed to create team')
@@ -127,18 +143,21 @@ export default function SubmitProjectPage() {
 
   const handleSubmitProject = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!eventId) return
+    if (!eventId) {
+      toast.error('Event information not found. Please refresh the page.')
+      return
+    }
 
+    if (!teamId) {
+      toast.error('Please create or select a team first')
+      return
+    }
     if (!title.trim()) {
       toast.error('Please enter a project title')
       return
     }
     if (!description.trim()) {
       toast.error('Please describe your project')
-      return
-    }
-    if (!teamId) {
-      toast.error('Please select or create a team first')
       return
     }
 
@@ -256,7 +275,7 @@ export default function SubmitProjectPage() {
         ) : (
           <div className="flex flex-col gap-6">
             {/* Step 1: Team Selection / Creation */}
-            <div className="card">
+            <div className="card" style={{ padding: '1.75rem' }}>
               <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Users size={18} style={{ color: 'var(--violet-400)' }} /> 1. Team Formation
               </h2>
@@ -266,7 +285,7 @@ export default function SubmitProjectPage() {
                   <label className="label" htmlFor="teamSelect">Select Your Team</label>
                   <select
                     id="teamSelect"
-                    className="input"
+                    className="form-input"
                     value={teamId}
                     onChange={(e) => setTeamId(e.target.value)}
                     style={{ marginBottom: '1rem' }}
@@ -277,27 +296,57 @@ export default function SubmitProjectPage() {
                       </option>
                     ))}
                   </select>
+
+                  {/* Invite code for existing team — fetch from team detail if not set yet */}
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                    Share your invite link to add teammates (up to 4 members total).
+                  </p>
+                  {inviteCode && (
+                    <div style={{ marginTop: '0.75rem', background: 'rgba(139,92,246,0.06)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius-md)', padding: '0.875rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Team Invite Link</div>
+                        <code style={{ fontFamily: 'var(--font-mono)', fontSize: '0.875rem', color: 'var(--violet-400)' }}>
+                          {typeof window !== 'undefined' ? `${window.location.origin}/join/${inviteCode}` : `/join/${inviteCode}`}
+                        </code>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() => {
+                          const link = `${window.location.origin}/join/${inviteCode}`
+                          navigator.clipboard.writeText(link).then(() => {
+                            setCopiedInvite(true)
+                            setTimeout(() => setCopiedInvite(false), 2000)
+                          })
+                        }}
+                      >
+                        {copiedInvite ? '✓ Copied!' : 'Copy Link'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div style={{ marginBottom: '1rem' }}>
+                <div>
                   <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
                     You are not on a team for this event yet. Create one now (solo or group, up to 4 members):
                   </p>
-                  <div className="flex gap-2">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <input
                       type="text"
-                      className="input"
+                      className="form-input"
                       placeholder="e.g. CyberPunks, Team Rocket, SoloDev"
                       value={newTeamName}
                       onChange={(e) => setNewTeamName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleCreateTeam(e)}
                     />
                     <button
                       type="button"
-                      className="btn btn-secondary"
+                      className="btn btn-primary"
                       onClick={handleCreateTeam}
                       disabled={creatingTeam || !newTeamName.trim()}
+                      style={{ alignSelf: 'flex-start', minWidth: '140px', color: '#ffffff' }}
                     >
-                      {creatingTeam ? 'Creating...' : 'Create Team'}
+                      {creatingTeam ? 'Creating…' : '+ Create Team'}
                     </button>
                   </div>
                 </div>
@@ -305,7 +354,7 @@ export default function SubmitProjectPage() {
             </div>
 
             {/* Step 2: Project Info */}
-            <form onSubmit={handleSubmitProject} className="card flex flex-col gap-4">
+            <form onSubmit={handleSubmitProject} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', padding: '1.75rem' }}>
               <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Code2 size={18} style={{ color: 'var(--cyan-400)' }} /> 2. Project Details
               </h2>
@@ -359,32 +408,31 @@ export default function SubmitProjectPage() {
                 <textarea
                   id="projectDescription"
                   className="input"
-                  rows={8}
                   placeholder="Describe your architecture, the problem it solves, how you built it, challenges overcome, and stack..."
                   required
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  style={{ resize: 'vertical' }}
+                  style={{ resize: 'vertical', minHeight: '200px' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                 <div>
-                  <label className="label flex items-center gap-1" htmlFor="repoUrl">
+                  <label className="label" htmlFor="repoUrl" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <GitBranch size={14} /> GitHub Repository URL
                   </label>
                   <input
                     id="repoUrl"
                     type="url"
                     className="input"
-                    placeholder="https://github.com/..."
+                    placeholder="https://github.com/your-org/your-repo"
                     value={repoUrl}
                     onChange={(e) => setRepoUrl(e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label className="label flex items-center gap-1" htmlFor="demoUrl">
+                  <label className="label" htmlFor="demoUrl" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Globe size={14} /> Live Demo URL
                   </label>
                   <input
@@ -398,7 +446,7 @@ export default function SubmitProjectPage() {
                 </div>
 
                 <div>
-                  <label className="label flex items-center gap-1" htmlFor="videoUrl">
+                  <label className="label" htmlFor="videoUrl" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Video size={14} /> Demo Video URL
                   </label>
                   <input

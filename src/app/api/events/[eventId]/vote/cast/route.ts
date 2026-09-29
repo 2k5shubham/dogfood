@@ -1,126 +1,123 @@
+import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { logAudit, ok, err, rateLimit, quadraticCost, creditDelta } from '@/lib/utils'
-import crypto from 'crypto'
+import { logAudit, ok, err, unauthorized, rateLimit } from '@/lib/utils'
 
-function hashToken(token: string) {
-  return crypto.createHash('sha256').update(token).digest('hex')
-}
-
-// POST /api/events/[eventId]/vote/cast — cast quadratic vote
+/**
+ * POST /api/events/[eventId]/vote/cast
+ * Toggle upvote: authenticated user casts or retracts one vote per project.
+ *
+ * Anti-Sybil guarantees:
+ * 1. Must be logged in (registered account = unique email enforced at DB level)
+ * 2. @@unique([userId, projectId]) in DB — duplicate vote is a hard constraint violation
+ * 3. Account must have been created before the submission deadline (account-age check)
+ * 4. Rate limit: 20 vote actions per user per minute
+ * 5. Cannot vote for your own team's project
+ * 6. Full audit trail with userId + IP
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
-  const { eventId } = await params
-  const { token, projectId, voteCount } = await request.json()
+  const user = await getCurrentUser()
+  if (!user) return unauthorized()
 
-  if (!token) return err('Voter token required')
-  if (typeof voteCount !== 'number' || voteCount < 0 || voteCount > 10) {
-    return err('voteCount must be 0-10')
-  }
+  const { eventId } = await params
+  const { projectId } = await request.json()
+  if (!projectId) return err('projectId required')
 
   const forwarded = request.headers.get('x-forwarded-for')
   const ip = forwarded ? forwarded.split(',')[0].trim() : 'unknown'
 
-  // Rate limit: 30 votes per token per minute
-  const { allowed } = rateLimit(`vote-cast:${token.slice(0, 8)}`, 30, 60 * 1000)
-  if (!allowed) return err('Too many vote changes. Wait a moment.', 429)
+  // Rate limit: 20 vote actions per user per minute
+  const { allowed } = rateLimit(`vote:${user.id}`, 20, 60 * 1000)
+  if (!allowed) return err('Too many votes. Wait a moment.', 429)
 
-  const tokenHash = hashToken(token)
-  const voterToken = await prisma.voterToken.findFirst({
-    where: { tokenHash, eventId, emailVerified: true },
-  })
-
-  if (!voterToken) return err('Invalid or unverified voter token', 401)
-
-  // Check voting window
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: { votingDeadline: true, votingOpensAt: true, resultsPublishedAt: true },
-  })
-
-  const now = new Date()
-  if (event?.votingDeadline && now > event.votingDeadline) return err('Voting has closed', 403)
-  if (event?.votingOpensAt && now < event.votingOpensAt) return err('Voting not open yet', 403)
-
-  // Calculate credit delta
-  const existing = await prisma.projectVote.findUnique({
-    where: { voterTokenId_projectId: { voterTokenId: voterToken.id, projectId } },
-  })
-  const currentVotes = existing?.voteCount ?? 0
-  const delta = creditDelta(currentVotes, voteCount)
-  const newCreditsUsed = voterToken.creditsUsed + delta
-
-  if (newCreditsUsed > voterToken.totalCredits) {
-    return err(
-      `Insufficient credits. Need ${delta} more but only have ${voterToken.totalCredits - voterToken.creditsUsed} remaining.`,
-      400
-    )
-  }
-
-  // Atomic transaction
-  await prisma.$transaction([
-    prisma.voterToken.update({
-      where: { id: voterToken.id },
-      data: { creditsUsed: newCreditsUsed },
+  // Load event + project in parallel
+  const [event, project] = await Promise.all([
+    prisma.event.findUnique({
+      where: { id: eventId },
+      select: { votingOpensAt: true, votingDeadline: true, submissionDeadline: true },
     }),
-    voteCount === 0
-      ? prisma.projectVote.deleteMany({
-          where: { voterTokenId: voterToken.id, projectId },
-        })
-      : prisma.projectVote.upsert({
-          where: { voterTokenId_projectId: { voterTokenId: voterToken.id, projectId } },
-          create: { voterTokenId: voterToken.id, projectId, voteCount, creditsSpent: quadraticCost(voteCount) },
-          update: { voteCount, creditsSpent: quadraticCost(voteCount) },
-        }),
+    prisma.project.findUnique({
+      where: { id: projectId },
+      include: { team: { include: { members: { select: { userId: true } } } } },
+    }),
   ])
 
-  await logAudit({
-    action: 'VOTE_CAST',
-    entityType: 'project_vote',
-    entityId: projectId,
-    eventId,
-    newValue: { voteCount, creditsSpent: quadraticCost(voteCount), delta },
-    ipAddress: ip,
+  if (!event) return err('Event not found', 404)
+  if (!project) return err('Project not found', 404)
+
+  // Voting window check
+  const now = new Date()
+  if (event.votingDeadline && now > event.votingDeadline) return err('Voting has closed', 403)
+  if (event.votingOpensAt && now < event.votingOpensAt) return err('Voting has not opened yet', 403)
+
+  // Account-age check: account must exist before the submission deadline.
+  // This means an attacker cannot create new accounts specifically to vote after
+  // seeing which projects were submitted.
+  if (user.createdAt > event.submissionDeadline) {
+    return err('Your account was created after the submission deadline. Only accounts pre-dating the deadline can vote.', 403)
+  }
+
+  // Self-vote prevention: cannot vote for your own team's project
+  const isOwnTeam = project.team.members.some(m => m.userId === user.id)
+  if (isOwnTeam) return err('You cannot vote for your own team\'s project', 403)
+
+  // Toggle vote: if vote exists → remove it (retract). If not → create it.
+  const existing = await prisma.userVote.findUnique({
+    where: { userId_projectId: { userId: user.id, projectId } },
   })
 
-  return ok({
-    voteCount,
-    creditsSpent: quadraticCost(voteCount),
-    creditsRemaining: voterToken.totalCredits - newCreditsUsed,
-  })
+  if (existing) {
+    // Retract vote
+    await prisma.userVote.delete({ where: { id: existing.id } })
+    await logAudit({
+      userId: user.id,
+      action: 'VOTE_RETRACT',
+      entityType: 'user_vote',
+      entityId: projectId,
+      eventId,
+      ipAddress: ip,
+      newValue: { projectId, action: 'retract' },
+    })
+    const count = await prisma.userVote.count({ where: { projectId } })
+    return ok({ voted: false, voteCount: count })
+  } else {
+    // Cast vote (DB UNIQUE constraint is the final safety net against duplicates)
+    await prisma.userVote.create({
+      data: { userId: user.id, projectId, eventId },
+    })
+    await logAudit({
+      userId: user.id,
+      action: 'VOTE_CAST',
+      entityType: 'user_vote',
+      entityId: projectId,
+      eventId,
+      ipAddress: ip,
+      newValue: { projectId, action: 'cast' },
+    })
+    const count = await prisma.userVote.count({ where: { projectId } })
+    return ok({ voted: true, voteCount: count })
+  }
 }
 
-// GET /api/events/[eventId]/vote/cast?token=... — get voter's current votes
+/**
+ * GET /api/events/[eventId]/vote/cast
+ * Returns the current user's votes in this event.
+ */
 export async function GET(
-  request: Request,
+  _req: Request,
   { params }: { params: Promise<{ eventId: string }> }
 ) {
+  const user = await getCurrentUser()
+  if (!user) return ok({ myVotes: [], authenticated: false })
+
   const { eventId } = await params
-  const { searchParams } = new URL(request.url)
-  const token = searchParams.get('token')
 
-  if (!token) return err('Token required', 400)
-
-  const tokenHash = hashToken(token)
-  const voterToken = await prisma.voterToken.findFirst({
-    where: { tokenHash, eventId },
-    include: { votes: true },
+  const myVotes = await prisma.userVote.findMany({
+    where: { userId: user.id, eventId },
+    select: { projectId: true },
   })
 
-  if (!voterToken) return err('Invalid token', 401)
-
-  // Results hidden during voting window
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    select: { votingDeadline: true, resultsPublishedAt: true },
-  })
-
-  return ok({
-    creditsRemaining: voterToken.totalCredits - voterToken.creditsUsed,
-    creditsUsed: voterToken.creditsUsed,
-    totalCredits: voterToken.totalCredits,
-    votes: voterToken.votes,
-    ballotOrder: voterToken.ballotOrder, // randomized project order
-  })
+  return ok({ myVotes: myVotes.map(v => v.projectId), authenticated: true })
 }
